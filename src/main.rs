@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, net::TcpStream, io::Write};
 
 // 2. MQTT Control Packet format
 // 2.1. Structure of an MQTT Control Packet
@@ -11,16 +11,17 @@ use std::fmt;
 //  ------------------------------------------------
 
 // 2.2. Fixed header
-//  ----------------------------------------------------------------------------------------
-// | bit    |    7    |    6    |    5    |    4    |    3    |    2    |    1    |    0    |
-//  ----------------------------------------------------------------------------------------
-// | byte 1 |  MQTT control packet type |  Flags specific to each MQTT control packet type  |
-// -----------------------------------------------------------------------------------------
-// | byte 2 |                               Remaining length                                |
-// -----------------------------------------------------------------------------------------
+//  ----------------------------------------------------------------------------------------------------
+// | bit    |    7    |    6    |    5    |    4    |     3      |     2      |     1      |      0     |
+//  ----------------------------------------------------------------------------------------------------
+// | byte 1 |  MQTT control packet type             |  Flags specific to each MQTT control packet type  |
+// -----------------------------------------------------------------------------------------------------
+// | byte 2 |                               Remaining length                                            |
+// -----------------------------------------------------------------------------------------------------
 
 // 2.2.1. MQTT Control Packet type
 #[derive(Debug, PartialEq)]
+#[repr(u8)]
 pub enum ControlPacketType {
     Connect = 1,
     ConnAck = 2,
@@ -276,8 +277,11 @@ const MQTT_PROTOCOL_NAME: ProtocolName = ProtocolName {
 //  ---------------------------------------------------------
 // | byte 7 |     Level(4)   | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |
 //  ---------------------------------------------------------
+#[repr(u8)]
 pub enum ProtocolLevel {
+    V3_1 = 3,
     V3_1_1 = 4,
+    V5 = 5,
 }
 
 // 3.1.2.3. Connect Flags
@@ -296,7 +300,7 @@ pub enum ProtocolLevel {
 
 #[derive(PartialEq, Debug)]
 pub struct ConnectFlags {
-    raw_byte: u8,
+    pub raw_byte: u8,
 }
 
 impl ConnectFlags {
@@ -333,33 +337,87 @@ impl ConnectFlags {
 
 pub struct ConnectPacket<'a> {
     pub packet_type: ControlPacketType, // 4 bits + 4 bits reserved
-    pub remaining_length: u32,          // up to 4 bytes
+    pub packet_flags: u8,
+    pub remaining_length: u32, // up to 4 bytes
     pub protocol_name: ProtocolName<'a>,
     pub protocol_level: ProtocolLevel,
     pub connect_flags: ConnectFlags,
     pub keep_alive: u16,
-    pub payload: String,
+    pub client_id: String,
 }
 
 impl<'a> ConnectPacket<'a> {
     pub fn new() -> Self {
         Self {
             packet_type: ControlPacketType::Connect,
+            packet_flags: ControlPacketFlags::CONNECT_FLAGS,
             remaining_length: 0,
             protocol_name: MQTT_PROTOCOL_NAME,
             protocol_level: ProtocolLevel::V3_1_1,
-            connect_flags: ConnectFlags::from_byte(0),
-            keep_alive: 0,
-            payload: String::from(""),
+            connect_flags: ConnectFlags::from_byte(2), // clean session bit to 1, the rest to 0
+            keep_alive: 10,                            // for 10 seconds
+            // payload
+            client_id: String::from("mqutekitty_client"),
         }
     }
 
-    pub fn encode(&self) -> &[u8]{
-        return &[]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut vec: Vec<u8> = Vec::new();
+
+        // Fixed Header
+        let packet_type_repr: u8 = self.packet_type as u8;
+        let fh_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
+        vec.push(fh_byte1); // fh_
+        let mut remaining_length = 0;
+
+        // Variable Header
+        vec.push(0); // variable header byte 1: Length MSB (0)
+        remaining_length += 1;
+        vec.push(4); // variable header byte 2: Length LSB (4)
+        remaining_length += 1;
+        vec.push(b'M');
+        remaining_length += 1;
+        vec.push(b'Q');
+        remaining_length += 1;
+        vec.push(b'T');
+        remaining_length += 1;
+        vec.push(b'T');
+        remaining_length += 1;
+        vec.push(self.protocol_level as u8); // vh byte 7
+        remaining_length += 1;
+        vec.push(self.connect_flags.raw_byte); // vh byte 8 - connected flags
+        remaining_length += 1;
+        for keep_alive_part in self.keep_alive.to_be_bytes() {
+            vec.push(keep_alive_part);
+            remaining_length += 1;
+        }
+        let client_id_size = self.client_id.len() as u16;
+        for client_id_size_part in client_id_size.to_be_bytes() {
+            vec.push(client_id_size_part);
+            remaining_length += 1;
+        }
+        for client_id_part in self.client_id.as_bytes() {
+            vec.push(client_id_part.clone());
+            remaining_length += 1;
+        }
+
+        let encode_result = encode_remaining_length(remaining_length);
+        let encoded_remaining_length = match encode_result {
+            Ok(length) => length,
+            Err(error) => panic!("Error encoding ConnectPacket: {}", error),
+        };
+
+        let mut index = 1;
+        for remaining_length_part in encoded_remaining_length {
+            vec.insert(index, remaining_length_part);
+            index += 1;
+        }
+
+        return vec;
     }
 
-    pub fn decode(packet_bytes: &[u8]) -> ConnectPacket{
-        return ConnectPacket::new()
+    pub fn decode(_packet_bytes: &[u8]) -> ConnectPacket {
+        return ConnectPacket::new();
     }
 }
 
@@ -375,12 +433,71 @@ mod connect_packet_tests {
         assert_eq!(connect_packet.remaining_length, 0);
         assert_eq!(connect_packet.protocol_name.length, 4);
         assert_eq!(connect_packet.protocol_name.name, String::from("MQTT"));
-        assert_eq!(connect_packet.connect_flags, ConnectFlags::from_byte(0));
-        assert_eq!(connect_packet.keep_alive, 0);
-        assert_eq!(connect_packet.payload, "");
+        assert_eq!(connect_packet.connect_flags, ConnectFlags::from_byte(2));
+        assert_eq!(connect_packet.keep_alive, 10);
+        assert_eq!(connect_packet.client_id, "mqutekitty_client");
+    }
+
+    #[test]
+    fn encode_test() {
+        let connect_packet = ConnectPacket::new();
+
+        let connect_packet_bytes: Vec<u8> = connect_packet.encode();
+
+        println!("{:?}", connect_packet_bytes);
+        assert_eq!(connect_packet_bytes.len(), 31);
+        assert_eq!(connect_packet_bytes[0], 0x10);
+        assert_eq!(connect_packet_bytes[1], 0x1d); // TODO: check if the lengt calculation is correct!
+        assert_eq!(connect_packet_bytes[2], 0x00); // protocol name length MSB
+        assert_eq!(connect_packet_bytes[3], 0x04); // protocol name length LSB
+        assert_eq!(connect_packet_bytes[4], 0x4d); // 'M'
+        assert_eq!(connect_packet_bytes[5], 0x51); // 'Q'
+        assert_eq!(connect_packet_bytes[6], 0x54); // 'T'
+        assert_eq!(connect_packet_bytes[7], 0x54); // 'T'
+        assert_eq!(connect_packet_bytes[8], 0x04); // packet level
+        assert_eq!(connect_packet_bytes[9], 0x02); // connect flags
+        assert_eq!(connect_packet_bytes[10], 0); // keep alive MSB
+        assert_eq!(connect_packet_bytes[11], 10); // keep alive LSB
+        assert_eq!(connect_packet_bytes[12], 0); // client_id length MSB
+        assert_eq!(connect_packet_bytes[13], 17); // client_id length LSB
+        assert_eq!(connect_packet_bytes[14], 109); // 'm'
+        assert_eq!(connect_packet_bytes[15], 113); // 'q'
+        assert_eq!(connect_packet_bytes[16], 117); // 'u'
+        assert_eq!(connect_packet_bytes[17], 116); // 't'
+        assert_eq!(connect_packet_bytes[18], 101); // 'e'
+        assert_eq!(connect_packet_bytes[19], 107); // 'k'
+        assert_eq!(connect_packet_bytes[20], 105); // 'i'
+        assert_eq!(connect_packet_bytes[21], 116); // 't'
+        assert_eq!(connect_packet_bytes[22], 116); // 't'
+        assert_eq!(connect_packet_bytes[23], 121); // 'y'
+        assert_eq!(connect_packet_bytes[24], 95); // '_'
+        assert_eq!(connect_packet_bytes[25], 99); // 'c'
+        assert_eq!(connect_packet_bytes[26], 108); // 'l'
+        assert_eq!(connect_packet_bytes[27], 105); // 'i'
+        assert_eq!(connect_packet_bytes[28], 101); // 'e'
+        assert_eq!(connect_packet_bytes[29], 110); // 'n'
+        assert_eq!(connect_packet_bytes[30], 116); // 't'
     }
 }
 
 fn main() -> Result<(), std::io::Error> {
+
+    let connect_packet = ConnectPacket::new();
+    let _connect_packet_bytes: Vec<u8> = connect_packet.encode();
+
+    if let Ok(mut stream) = TcpStream::connect("127.0.0.1:1883"){
+        println!("Connected to the server!");
+
+        match stream.write(&_connect_packet_bytes){
+            Ok(_) => println!("Write CONNECT packet - OK"),
+            Err(ref error) => {
+                println!("Error writing to TcpSteam {}", error);
+            }
+        }
+    }
+    else{
+        println!("Couldn't connect to the server...");
+    }
+
     return Ok(());
 }

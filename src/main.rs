@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    io::{Read, Write},
+    io::{BufReader, ErrorKind, Read, Write},
     net::TcpStream,
 };
 
@@ -351,19 +351,23 @@ pub struct ConnectPacket<'a> {
 }
 
 impl<'a> ConnectPacket<'a> {
-    pub fn new() -> Self {
+    pub fn new(connect_flags: u8) -> Self {
         Self {
             packet_type: ControlPacketType::Connect,
             packet_flags: ControlPacketFlags::CONNECT_FLAGS,
             remaining_length: 0,
             protocol_name: MQTT_PROTOCOL_NAME,
             protocol_level: ProtocolLevel::V3_1_1,
-            connect_flags: ConnectFlags::from_byte(2), // clean session bit to 1, the rest to 0
+            connect_flags: ConnectFlags::from_byte(connect_flags),
             keep_alive: 10,                            // for 10 seconds
             // payload
             client_id: String::from("mqutekitty_client"),
         }
     }
+
+    // pub fn to_bytes(&self) -> &[u8]{
+    //     return self.encode().as_slice();
+    // }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
@@ -421,7 +425,7 @@ impl<'a> ConnectPacket<'a> {
     }
 
     pub fn decode(_packet_bytes: &[u8]) -> ConnectPacket {
-        return ConnectPacket::new();
+        return ConnectPacket::new(0);
     }
 }
 
@@ -431,7 +435,7 @@ mod connect_packet_tests {
 
     #[test]
     fn create_test() {
-        let connect_packet = ConnectPacket::new();
+        let connect_packet = ConnectPacket::new(ConnectFlags::from_byte(2));
 
         assert_eq!(connect_packet.packet_type, ControlPacketType::Connect);
         assert_eq!(connect_packet.remaining_length, 0);
@@ -444,7 +448,7 @@ mod connect_packet_tests {
 
     #[test]
     fn encode_test() {
-        let connect_packet = ConnectPacket::new();
+        let connect_packet = ConnectPacket::new(ConnectFlags::from_byte(2));
 
         let connect_packet_bytes: Vec<u8> = connect_packet.encode();
 
@@ -484,27 +488,129 @@ mod connect_packet_tests {
     }
 }
 
-fn main() -> Result<(), std::io::Error> {
-    let connect_packet = ConnectPacket::new();
-    let _connect_packet_bytes: Vec<u8> = connect_packet.encode();
+// fn handle_connection(mut stream: TcpStream){
+//     let connect_packet = ConnectPacket::new();
+//     let _connect_packet_bytes: Vec<u8> = connect_packet.encode();
+//     match stream.write_all(&_connect_packet_bytes) {
+//         Ok(_) => {
+//             println!("Write CONNECT packet - OK");
+//             // //let mut buf = [0; 512];
+//             let mut buffer: Vec<u8> = Vec::new();
+//             let mut reader = BufReader::new(&stream);
+//             reader.read(&mut buffer);
+//             // //let read_bytes = stream.read(&mut buffer).unwrap();
+//             // //println!("{:?}", &buffer[..read_bytes]);
+//             println!("{:?}", buffer);
+//             // // let temp = stream.read(&mut buf).unwrap();
+//             // // println!("{:?}", temp);
+//         }
+//         Err(ref error) => {
+//             println!("Error writing to TcpSteam {}", error);
+//         }
+//     }
+// }
+// fn main() -> Result<(), std::io::Error> {
+//     let server: String = String::from("127.0.0.1:1883");
+//     if let Ok(stream) = TcpStream::connect(&server) {
+//         println!("Connected to the server!");
+//         handle_connection(stream);
+//     } else {
+//         println!("Couldn't connect to the server...");
+//     }
+//     return Ok(());
+// }
 
-    if let Ok(mut stream) = TcpStream::connect("127.0.0.1:1883") {
-        println!("Connected to the server!");
+pub struct MyQuteKittyClient<'a> {
+    connect_flags: u8,
+    server_address: Option<&'a str>,
+    tcp_stream: Option<TcpStream>,
+}
 
-        match stream.write_all(&_connect_packet_bytes) {
-            Ok(_) => {
-                println!("Write CONNECT packet - OK");
-                let mut buf = [0; 512];
-                let read_bytes = stream.read(&mut buf).unwrap();
-                println!("{:?}", &buf[..read_bytes]);
-            }
-            Err(ref error) => {
-                println!("Error writing to TcpSteam {}", error);
-            }
-        }
-    } else {
-        println!("Couldn't connect to the server...");
+impl<'a> MyQuteKittyClient<'a> {
+    pub fn new(connect_flags: u8) -> Self {
+        return MyQuteKittyClient {
+            connect_flags,
+            server_address: None,
+            tcp_stream: None,
+        };
     }
 
-    return Ok(());
+    pub fn connect(&mut self, address: &'a str) -> Result<(), std::io::Error> {
+        self.server_address = Some(address);
+
+        match TcpStream::connect(address) {
+            Ok(stream) => {
+                self.tcp_stream = Some(stream);
+            }
+            Err(error) => {
+                return Err(error);
+            }
+        }
+
+        let connect_packet_bytes = ConnectPacket::new(self.connect_flags).encode();
+        match self
+            .tcp_stream
+            .as_ref()
+            .unwrap()
+            .write_all(&connect_packet_bytes)
+        {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                return Err(error);
+            }
+        }
+    }
+
+    pub fn disconnect(&self) -> Result<(), std::io::Error> {
+        return Ok(());
+    }
+
+    pub fn subscribe(&self, _topic: &str) -> Result<(), std::io::Error> {
+        return Ok(());
+    }
+
+    pub fn unsubscribe(&self, _topic: &str) -> Result<(), std::io::Error> {
+        return Ok(());
+    }
+
+    pub fn publish(&self, _topic: &str,_payload: &str) -> Result<(), std::io::Error> {
+        return Ok(());
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    println!("My Qute kiTTy v0.0.1");
+println!("    ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣿⣿⡷⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ⠀⠀⢀⣴⣿⡿⠋⠈⠻⣮⣳⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
+println!("⠀⠀ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⣾⡿⠋⠀⠀⠀⠀⠙⣿⣿⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣶⣿⡿⠟⠛⠉⠀⠀⠀⠀⠀⠀⠀⠈⠛⠛⠿⠿⣿⣷⣶⣤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣾⡿⠟⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠛⠻⠿⣿⣶⣦⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
+println!("⠀⠀⠀⣀⣠⣤⣤⣀⡀⠀⠀⣀⣴⣿⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠿⣿⣷⣦⣄⡀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣄⠀⠀");
+println!("⢀⣤⣾⡿⠟⠛⠛⢿⣿⣶⣾⣿⠟⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠿⣿⣷⣦⣀⣀⣤⣶⣿⡿⠿⢿⣿⡀⠀");
+println!("⣿⣿⠏⠀⢰⡆⠀⠀⠉⢿⣿⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⢿⡿⠟⠋⠁⠀⠀⢸⣿⠇⠀");
+println!("⣿⡟⠀⣀⠈⣀⡀⠒⠃⠀⠙⣿⡆⠀⠀⠀⠀⠀⠀⠀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⠇⠀");
+println!("⣿⡇⠀⠛⢠⡋⢙⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⣿⣿⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠀⠀");
+println!("⣿⣧⠀⠀⠀⠓⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠛⠋⠀⠀⢸⣧⣤⣤⣶⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⣿⡿⠀⠀");
+println!("⣿⣿⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠻⣷⣶⣶⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⠁⠀⠀");
+println!("⠈⠛⠻⠿⢿⣿⣷⣶⣦⣤⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣴⣿⣷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⣿⡏⠀⠀⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠉⠙⠛⠻⠿⢿⣿⣷⣶⣦⣤⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠿⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢿⣿⡄⠀⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⠛⠻⠿⢿⣿⣷⣶⣦⣤⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢿⣿⡄⠀");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠛⠛⠿⠿⣿⣷⣶⣶⣤⣤⣀⡀⠀⠀⠀⢀⣴⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢿⡿⣄");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠛⠛⠿⠿⣿⣷⣶⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⣹");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⠀⠀⠀⠀⠀⠀⢸⣧");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣆⠀⠀⠀⠀⠀⠀⢀⣀⣠⣤⣶⣾⣿⣿⣿⣿⣤⣄⣀⡀⠀⠀⠀⣿");
+println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣻⣷⣶⣾⣿⣿⡿⢯⣛⣛⡋⠁⠀⠀⠉⠙⠛⠛⠿⣿⣿⡷⣶⣿");
+
+    let connect_flags = 0b00000010; // clean session bit to 1, the rest to 0
+    let mut mqtt_client = MyQuteKittyClient::new(connect_flags);
+    let server_address = String::from("127.0.0.1:1883");
+    match mqtt_client.connect(&server_address) {
+        Ok(_) => {
+            println!("Connected to {:?}", server_address);
+        }
+        Err(error) => {
+            println!("Error connecting to server! {:?}", error);
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use std::{fmt, net::TcpStream, io::Write};
+use std::{fmt, net::TcpStream, io::{Write, Read}, fs::read};
 
 // 2. MQTT Control Packet format
 // 2.1. Structure of an MQTT Control Packet
@@ -488,8 +488,13 @@ fn main() -> Result<(), std::io::Error> {
     if let Ok(mut stream) = TcpStream::connect("127.0.0.1:1883"){
         println!("Connected to the server!");
 
-        match stream.write(&_connect_packet_bytes){
-            Ok(_) => println!("Write CONNECT packet - OK"),
+        match stream.write_all(&_connect_packet_bytes){
+            Ok(_) => {
+                println!("Write CONNECT packet - OK");
+                let mut buf = [0; 512];
+                let read_bytes = stream.read(&mut buf).unwrap();
+                println!("{:?}", &buf[..read_bytes]);
+            },
             Err(ref error) => {
                 println!("Error writing to TcpSteam {}", error);
             }

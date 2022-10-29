@@ -1,8 +1,8 @@
 use std::{
     fmt,
-    io::{Read, Write},
+    io::{self, BufRead, Write},
     net::TcpStream,
-    thread, time,
+    thread,
 };
 
 // 2. MQTT Control Packet format
@@ -28,6 +28,7 @@ use std::{
 #[derive(Debug, PartialEq)]
 #[repr(u8)]
 pub enum ControlPacketType {
+    Unknown = 0,
     Connect = 1,
     ConnAck = 2,
     Publish = 3,
@@ -43,6 +44,51 @@ pub enum ControlPacketType {
     PingResp = 13,
     Disconnect = 14,
 }
+
+impl From<u8> for ControlPacketType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => ControlPacketType::Connect,
+            2 => ControlPacketType::ConnAck,
+            3 => ControlPacketType::Publish,
+            4 => ControlPacketType::PubAck,
+            5 => ControlPacketType::PubRec,
+            6 => ControlPacketType::PubRel,
+            7 => ControlPacketType::PubComp,
+            8 => ControlPacketType::Subscribe,
+            9 => ControlPacketType::SubAck,
+            10 => ControlPacketType::Unsubscribe,
+            11 => ControlPacketType::UnsubAck,
+            12 => ControlPacketType::PingReq,
+            13 => ControlPacketType::PingResp,
+            14 => ControlPacketType::Disconnect,
+            _ => ControlPacketType::Unknown
+        }
+    }
+}
+
+// impl TryFrom<u8> for ControlPacketType {
+//     type Error = ();
+//     fn try_from(value: u8) -> Result<Self, Self::Error> {
+//         match value {
+//             1 => Ok(ControlPacketType::Connect),
+//             2 => Ok(ControlPacketType::ConnAck),
+//             3 => Ok(ControlPacketType::Publish),
+//             4 => Ok(ControlPacketType::PubAck),
+//             5 => Ok(ControlPacketType::PubRec),
+//             6 => Ok(ControlPacketType::PubRel),
+//             7 => Ok(ControlPacketType::PubComp),
+//             8 => Ok(ControlPacketType::Subscribe),
+//             9 => Ok(ControlPacketType::SubAck),
+//             10 => Ok(ControlPacketType::Unsubscribe),
+//             11 => Ok(ControlPacketType::UnsubAck),
+//             12 => Ok(ControlPacketType::PingReq),
+//             13 => Ok(ControlPacketType::PingResp),
+//             14 => Ok(ControlPacketType::Disconnect),
+//             _ => Err(())
+//         }
+//     }
+// }
 
 // 2.2.2. Flags
 pub struct ControlPacketFlags {}
@@ -489,6 +535,7 @@ mod connect_packet_tests {
     }
 }
 
+#[derive(Debug)]
 pub struct ConnAck {
     pub packet_type: ControlPacketType, // 4 bits + 4 bits reserved
     pub packet_flags: u8,
@@ -508,9 +555,22 @@ impl ConnAck {
         }
     }
 
-    pub fn decode(bytes: &[u8]) -> ConnAck {
-        return ConnAck::new();
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let remaining_length = decode_remaining_length(&bytes[1..]).unwrap();
+        let remaining_length_byte_count = encode_remaining_length(remaining_length).unwrap().len();
+        let connect_ack_flags_index = 1 + remaining_length_byte_count;
+        let connect_return_code_index = connect_ack_flags_index + 1;
+        Self { 
+            packet_type: ControlPacketType::ConnAck, 
+            packet_flags: ControlPacketFlags::CONNACK_FLAGS, 
+            remaining_length: remaining_length, 
+            connect_ack_flags: bytes[connect_ack_flags_index], 
+            connect_return_code: bytes[connect_return_code_index] }
     }
+
+    // pub fn decode(bytes: &[u8]) -> ConnAck {
+    //     return ConnAck::new();
+    // }
 }
 
 pub struct MyQuteKittyClient<'a> {
@@ -532,23 +592,64 @@ impl<'a> MyQuteKittyClient<'a> {
         self.server_address = Some(address);
 
         match TcpStream::connect(address) {
-            Ok(mut stream) => {
-                //self.tcp_stream = Some(stream);
+            Ok(stream) => {
+                self.tcp_stream = Some(stream);
 
                 let connect_packet_bytes = ConnectPacket::new(self.connect_flags).encode();
-                match stream.write_all(&connect_packet_bytes) {
+                match self
+                    .tcp_stream
+                    .as_ref()
+                    .unwrap()
+                    .write_all(&connect_packet_bytes)
+                {
                     Ok(_) => {
-                        //let mut buf: Vec<u8> = Vec::new();
-                        let mut buf = [0; 512];
-                        match stream.read(&mut buf) {
-                            Ok(read_count) => {
-                                println!("Read {} bytes OK - {:?}", read_count, &buf[..read_count]);
-                            }
-                            Err(error) => {
-                                println!("Error reading from the stream: {:?}", error);
-                            }
-                        }
+                        let my_stream = self.tcp_stream.as_ref().unwrap().try_clone().unwrap();
+                        let mut reader = io::BufReader::new(my_stream);
+                        let handle = thread::spawn(move || {
+                            let received: Vec<u8> = reader.fill_buf().unwrap().to_vec();
+                            if received.len() > 0 {
+                                let packet_type: u8 = (received[0] & 0xf0) >> 4;
+                                match packet_type.into() {
+                                    ControlPacketType::ConnAck => {
+                                        println!("Received a ConnAck");
                         
+                                        let conn_ack_packet = ConnAck::from_bytes(&received);
+                                        println!("{:?}", conn_ack_packet);
+
+                                    },
+                                    ControlPacketType::Connect => todo!(),
+                                    ControlPacketType::Publish => todo!(),
+                                    ControlPacketType::PubAck => println!("Received a PubAck"),
+                                    ControlPacketType::PubRec => todo!(),
+                                    ControlPacketType::PubRel => todo!(),
+                                    ControlPacketType::PubComp => todo!(),
+                                    ControlPacketType::Subscribe => todo!(),
+                                    ControlPacketType::SubAck => println!("Received a SubAck"),
+                                    ControlPacketType::Unsubscribe => todo!(),
+                                    ControlPacketType::UnsubAck => println!("Received an UnsubAck"),
+                                    ControlPacketType::PingReq => println!("Received a PingReq"),
+                                    ControlPacketType::PingResp => println!("Received a PingResp"),
+                                    ControlPacketType::Disconnect => todo!(),
+                                    _ => println!("Received an unknown control packet!"),
+                                }
+                            }
+                            println!("Read {:?}", received);
+                            reader.consume(received.len());
+                        });
+
+                        // thread::spawn(move || {
+                        //     //let mut buf = [0; 512];
+                        //     let mut buf: Vec<u8> = Vec::new();
+                        //     match my_stream.read(&mut buf) {
+                        //         Ok(read_count) => {
+                        //             println!("Read {} bytes OK - {:?}", read_count, buf);
+                        //         }
+                        //         Err(error) => {
+                        //             println!("Error reading from the stream: {:?}", error);
+                        //         }
+                        //     }
+                        // });
+
                         return Ok(());
                     }
                     Err(error) => {

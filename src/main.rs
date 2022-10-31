@@ -62,11 +62,12 @@ impl From<u8> for ControlPacketType {
             12 => ControlPacketType::PingReq,
             13 => ControlPacketType::PingResp,
             14 => ControlPacketType::Disconnect,
-            _ => ControlPacketType::Unknown
+            _ => ControlPacketType::Unknown,
         }
     }
 }
 
+// TODO: Why can't I implement TryFrom on a type after implementing the From trait?
 // impl TryFrom<u8> for ControlPacketType {
 //     type Error = ();
 //     fn try_from(value: u8) -> Result<Self, Self::Error> {
@@ -133,7 +134,6 @@ impl ControlPacketFlags {
 
 #[derive(Debug, Clone)]
 pub struct EncodeError;
-
 impl fmt::Display for EncodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error encoding value")
@@ -159,7 +159,7 @@ pub fn encode_remaining_length(mut length: u32) -> Result<Vec<u8>, EncodeError> 
     }
 }
 
-const MAX_REMAINING_LENGTH: u32 = 128 * 128 * 128;
+const MAX_REMAINING_LENGTH: u32 = 2_097_152; //128 * 128 * 128
 
 #[derive(Debug, Clone)]
 pub struct DecodeError;
@@ -297,15 +297,15 @@ mod tests {
 //  ---------------------------------------------------------
 // | byte 1 | Length MSB (0) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 // ----------------------------------------------------------
-// | byte 2 | Length LSM (4) | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |                                                              |
+// | byte 2 | Length LSM (4) | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |
 // ----------------------------------------------------------
-// | byte 3 |       'M'      | 0 | 1 | 0 | 0 | 1 | 1 | 0 | 1 |                                                              |
+// | byte 3 |       'M'      | 0 | 1 | 0 | 0 | 1 | 1 | 0 | 1 |
 // ----------------------------------------------------------
-// | byte 4 |       'Q'      | 0 | 1 | 0 | 1 | 0 | 0 | 0 | 1 |                                                              |
+// | byte 4 |       'Q'      | 0 | 1 | 0 | 1 | 0 | 0 | 0 | 1 |
 // ----------------------------------------------------------
-// | byte 5 |       'T'      | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 |                                                              |
+// | byte 5 |       'T'      | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 |
 // ----------------------------------------------------------
-// | byte 6 |       'T'      | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 |                                                              |
+// | byte 6 |       'T'      | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 |
 // ----------------------------------------------------------
 
 pub struct ProtocolName<'a> {
@@ -355,13 +355,143 @@ pub struct ConnectFlags {
 }
 
 impl ConnectFlags {
-    pub fn from_byte(byte: u8) -> ConnectFlags {
-        return ConnectFlags { raw_byte: byte };
+    pub fn builder() -> ConnectFlagsBuilder {
+        ConnectFlagsBuilder::default()
+    }
+}
+
+impl From<u8> for ConnectFlags {
+    fn from(byte: u8) -> Self {
+        ConnectFlags { raw_byte: byte }
+    }
+}
+
+#[derive(Default, PartialEq)]
+pub struct ConnectFlagsBuilder {
+    byte_rep: u8,
+}
+
+impl ConnectFlagsBuilder {
+    const USER_NAME_MASK: u8 = 0b1000_0000;
+    const PASSWORD_MASK: u8 = 0b0100_0000;
+    const WILL_RETAIN_MASK: u8 = 0b0010_0000;
+    const WILL_QOS_MASK: u8 = 0b0001_1000;
+    const WILL_FLAG_MASK: u8 = 0b0000_0100;
+    const CLEAN_SESSION_MASK: u8 = 0b0000_0010;
+
+    pub fn new() -> ConnectFlagsBuilder {
+        ConnectFlagsBuilder::default()
     }
 
-    // pub fn user_name_flag(&self) -> bool{
-    //     return self.raw_byte[8] == 1;
-    // }
+    pub fn with_user_name(&mut self) -> &mut ConnectFlagsBuilder {
+        self.byte_rep = self.byte_rep | ConnectFlagsBuilder::USER_NAME_MASK;
+        self
+    }
+
+    pub fn with_password(&mut self) -> &mut ConnectFlagsBuilder {
+        self.byte_rep = self.byte_rep | ConnectFlagsBuilder::PASSWORD_MASK;
+        self
+    }
+
+    pub fn with_will_retain(&mut self) -> &mut ConnectFlagsBuilder {
+        self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_RETAIN_MASK;
+        self
+    }
+
+    pub fn with_will_qos(&mut self, qos: u8) -> &mut ConnectFlagsBuilder {
+        assert!(qos < 3);
+        self.byte_rep = self.byte_rep | ((qos << 3u8) & ConnectFlagsBuilder::WILL_QOS_MASK);
+        self
+    }
+
+    pub fn with_will_flag(&mut self) -> &mut ConnectFlagsBuilder {
+        self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_FLAG_MASK;
+        self
+    }
+
+    pub fn with_clean_session(&mut self) -> &mut ConnectFlagsBuilder {
+        self.byte_rep = self.byte_rep | ConnectFlagsBuilder::CLEAN_SESSION_MASK;
+        self
+    }
+
+    pub fn build(&mut self) -> ConnectFlags {
+        ConnectFlags {
+            raw_byte: self.byte_rep,
+        }
+    }
+}
+
+#[cfg(test)]
+mod connect_flags_tests {
+    use crate::ConnectFlagsBuilder;
+
+    #[test]
+    fn user_name_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_user_name().build();
+        assert_eq!(flags, 0b1000_0000.into())
+    }
+
+    #[test]
+    fn password_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_password().build();
+        assert_eq!(flags, 0b0100_0000.into())
+    }
+
+    #[test]
+    fn will_retain_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_will_retain().build();
+        assert_eq!(flags, 0b0010_0000.into())
+    }
+
+    #[test]
+    fn will_qos_2_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_will_qos(2).build();
+        assert_eq!(flags, 0b0001_0000.into())
+    }
+
+    #[test]
+    fn will_qos_1_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_will_qos(1).build();
+        assert_eq!(flags, 0b0000_1000.into())
+    }
+
+    #[test]
+    fn will_qos_0_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_will_qos(0).build();
+        assert_eq!(flags, 0b0000_0000.into())
+    }
+
+    #[test]
+    fn will_flag_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_will_flag().build();
+        assert_eq!(flags, 0b0000_0100.into())
+    }
+
+    #[test]
+    fn clean_session_build_test() {
+        let flags = ConnectFlagsBuilder::new().with_clean_session().build();
+        assert_eq!(flags, 0b0000_0010.into())
+    }
+
+    #[test]
+    #[should_panic]
+    fn will_qos_3_build_test() {
+        let _flags = ConnectFlagsBuilder::new().with_will_qos(3).build();
+    }
+
+    #[test]
+    fn build_test() {
+        let flags = ConnectFlagsBuilder::new()
+            .with_user_name()
+            .with_password()
+            .with_will_retain()
+            .with_will_qos(2)
+            .with_will_flag()
+            .with_clean_session()
+            .build();
+
+        assert_eq!(flags, 0b1111_0110.into());
+    }
 }
 
 // 3.1.2.10. Keep Alive
@@ -405,16 +535,12 @@ impl<'a> ConnectPacket<'a> {
             remaining_length: 0,
             protocol_name: MQTT_PROTOCOL_NAME,
             protocol_level: ProtocolLevel::V3_1_1,
-            connect_flags: ConnectFlags::from_byte(connect_flags),
+            connect_flags: connect_flags.into(),
             keep_alive: 10, // for 10 seconds
             // payload
             client_id: String::from("mqutekitty_client"),
         }
     }
-
-    // pub fn to_bytes(&self) -> &[u8]{
-    //     return self.encode().as_slice();
-    // }
 
     pub fn encode(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
@@ -478,7 +604,7 @@ impl<'a> ConnectPacket<'a> {
 
 #[cfg(test)]
 mod connect_packet_tests {
-    use crate::{ConnectFlags, ConnectPacket, ControlPacketType};
+    use crate::{ConnectPacket, ControlPacketType};
 
     #[test]
     fn create_test() {
@@ -488,7 +614,7 @@ mod connect_packet_tests {
         assert_eq!(connect_packet.remaining_length, 0);
         assert_eq!(connect_packet.protocol_name.length, 4);
         assert_eq!(connect_packet.protocol_name.name, String::from("MQTT"));
-        assert_eq!(connect_packet.connect_flags, ConnectFlags::from_byte(2));
+        assert_eq!(connect_packet.connect_flags, 2u8.into());
         assert_eq!(connect_packet.keep_alive, 10);
         assert_eq!(connect_packet.client_id, "mqutekitty_client");
     }
@@ -560,12 +686,13 @@ impl ConnAck {
         let remaining_length_byte_count = encode_remaining_length(remaining_length).unwrap().len();
         let connect_ack_flags_index = 1 + remaining_length_byte_count;
         let connect_return_code_index = connect_ack_flags_index + 1;
-        Self { 
-            packet_type: ControlPacketType::ConnAck, 
-            packet_flags: ControlPacketFlags::CONNACK_FLAGS, 
-            remaining_length: remaining_length, 
-            connect_ack_flags: bytes[connect_ack_flags_index], 
-            connect_return_code: bytes[connect_return_code_index] }
+        Self {
+            packet_type: ControlPacketType::ConnAck,
+            packet_flags: ControlPacketFlags::CONNACK_FLAGS,
+            remaining_length,
+            connect_ack_flags: bytes[connect_ack_flags_index],
+            connect_return_code: bytes[connect_return_code_index],
+        }
     }
 
     // pub fn decode(bytes: &[u8]) -> ConnAck {
@@ -605,18 +732,17 @@ impl<'a> MyQuteKittyClient<'a> {
                     Ok(_) => {
                         let my_stream = self.tcp_stream.as_ref().unwrap().try_clone().unwrap();
                         let mut reader = io::BufReader::new(my_stream);
-                        let handle = thread::spawn(move || {
+                        let _handle = thread::spawn(move || {
                             let received: Vec<u8> = reader.fill_buf().unwrap().to_vec();
                             if received.len() > 0 {
                                 let packet_type: u8 = (received[0] & 0xf0) >> 4;
                                 match packet_type.into() {
                                     ControlPacketType::ConnAck => {
                                         println!("Received a ConnAck");
-                        
+
                                         let conn_ack_packet = ConnAck::from_bytes(&received);
                                         println!("{:?}", conn_ack_packet);
-
-                                    },
+                                    }
                                     ControlPacketType::Connect => todo!(),
                                     ControlPacketType::Publish => todo!(),
                                     ControlPacketType::PubAck => println!("Received a PubAck"),
@@ -636,19 +762,6 @@ impl<'a> MyQuteKittyClient<'a> {
                             println!("Read {:?}", received);
                             reader.consume(received.len());
                         });
-
-                        // thread::spawn(move || {
-                        //     //let mut buf = [0; 512];
-                        //     let mut buf: Vec<u8> = Vec::new();
-                        //     match my_stream.read(&mut buf) {
-                        //         Ok(read_count) => {
-                        //             println!("Read {} bytes OK - {:?}", read_count, buf);
-                        //         }
-                        //         Err(error) => {
-                        //             println!("Error reading from the stream: {:?}", error);
-                        //         }
-                        //     }
-                        // });
 
                         return Ok(());
                     }

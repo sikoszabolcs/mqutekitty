@@ -264,8 +264,8 @@ impl<'a> ConnectPacket<'a> {
 
         // Fixed Header
         let packet_type_repr: u8 = self.packet_type as u8;
-        let fh_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
-        vec.push(fh_byte1); // fh_
+        let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
+        vec.push(fixed_header_byte1);
         let mut remaining_length = 0;
 
         // Variable Header

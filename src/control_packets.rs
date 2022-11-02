@@ -63,6 +63,28 @@ impl From<u8> for ControlPacketType {
     }
 }
 
+impl Into<u8> for ControlPacketType {
+    fn into(self) -> u8 {
+        match self {
+            ControlPacketType::Connect => 1,
+            ControlPacketType::ConnAck => 2,
+            ControlPacketType::Publish => 3,
+            ControlPacketType::PubAck => 4,
+            ControlPacketType::PubRec => 5,
+            ControlPacketType::PubRel => 6,
+            ControlPacketType::PubComp => 7,
+            ControlPacketType::Subscribe => 8,
+            ControlPacketType::SubAck => 9,
+            ControlPacketType::Unsubscribe => 10,
+            ControlPacketType::UnsubAck => 11,
+            ControlPacketType::PingReq => 12,
+            ControlPacketType::PingResp => 13,
+            ControlPacketType::Disconnect => 14,
+            ControlPacketType::Unknown => panic!(),
+        }
+    }
+}
+
 // TODO: Why can't I implement TryFrom on a type after implementing the From trait?
 
 // 2.2.2. Flags

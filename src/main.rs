@@ -8,7 +8,7 @@ use control_packets::ControlPacketType;
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
 
-use crate::conn_ack_packet::ConnAck;
+use crate::{conn_ack_packet::ConnAck, connect_packet::ConnectFlagsBuilder};
 
 pub mod conn_ack_packet;
 pub mod connect_packet;
@@ -148,9 +148,9 @@ async fn main() {
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣆⠀⠀⠀⠀⠀⠀⢀⣀⣠⣤⣶⣾⣿⣿⣿⣿⣤⣄⣀⡀⠀⠀⠀⣿");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣻⣷⣶⣾⣿⣿⡿⢯⣛⣛⡋⠁⠀⠀⠉⠙⠛⠛⠿⣿⣿⡷⣶⣿");
 
-    let connect_flags = 0b00000010; // clean session bit to 1, the rest to 0
-    let mut mqtt_client = MyQuteKittyClient::new(connect_flags);
-    let server_address = String::from("test.mosquitto.org:1883");
+    let flags = ConnectFlagsBuilder::new().with_clean_session().build();
+    let mut mqtt_client = MyQuteKittyClient::new(flags.into());
+    let server_address = String::from("127.0.0.1:1883");
     match mqtt_client.connect(server_address) {
         Ok(_) => {
             println!("connected to {:?}", mqtt_client.server_address);

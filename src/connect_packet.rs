@@ -66,9 +66,9 @@ pub enum ProtocolLevel {
 //  -------------------------------------------------------------------------------------
 // The Server MUST validate that the reserved flag in the CONNECT Control Packet is set to zero and disconnect the Client if it is not zero [MQTT-3.1.2-3].
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub struct ConnectFlags {
-    pub raw_byte: u8,
+    byte_rep: u8,
 }
 
 impl ConnectFlags {
@@ -79,7 +79,13 @@ impl ConnectFlags {
 
 impl From<u8> for ConnectFlags {
     fn from(byte: u8) -> Self {
-        ConnectFlags { raw_byte: byte }
+        ConnectFlags { byte_rep: byte }
+    }
+}
+
+impl Into<u8> for ConnectFlags {
+    fn into(self) -> u8 {
+        self.byte_rep
     }
 }
 
@@ -133,7 +139,7 @@ impl ConnectFlagsBuilder {
 
     pub fn build(&mut self) -> ConnectFlags {
         ConnectFlags {
-            raw_byte: self.byte_rep,
+            byte_rep: self.byte_rep,
         }
     }
 }
@@ -283,7 +289,7 @@ impl<'a> ConnectPacket<'a> {
         remaining_length += 1;
         vec.push(self.protocol_level as u8); // vh byte 7
         remaining_length += 1;
-        vec.push(self.connect_flags.raw_byte); // vh byte 8 - connected flags
+        vec.push(self.connect_flags.into()); // vh byte 8 - connected flags
         remaining_length += 1;
         for keep_alive_part in self.keep_alive.to_be_bytes() {
             vec.push(keep_alive_part);

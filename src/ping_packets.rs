@@ -1,67 +1,58 @@
-use crate::{control_packets::ControlPacketFlags, ControlPacketType};
+use crate::{
+    control_packets::{ControlPacketFlags, Encodable, FixedHeader},
+    ControlPacketType,
+};
 
 pub struct PingReqPacket {
-    pub packet_type: ControlPacketType,
-    pub packet_flags: u8,
-    pub remaining_length: u32,
+    pub fixed_header: FixedHeader,
+}
+
+impl Encodable for PingReqPacket {
+    fn encode(self) -> Vec<u8> {
+        self.fixed_header.encode()
+    }
 }
 
 impl PingReqPacket {
     pub fn new() -> PingReqPacket {
         PingReqPacket {
-            packet_type: ControlPacketType::PingReq,
-            packet_flags: ControlPacketFlags::PING_REQ_FLAGS,
-            remaining_length: 0,
+            fixed_header: FixedHeader {
+                packet_type: ControlPacketType::PingReq,
+                packet_flags: ControlPacketFlags::PING_REQ_FLAGS,
+                remaining_length: 0,
+            },
         }
-    }
-
-    pub fn encode(self) -> Vec<u8> {
-        let mut vec: Vec<u8> = Vec::new();
-        // Fixed Header
-        let packet_type_repr: u8 = self.packet_type.into();
-        let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
-        vec.push(fixed_header_byte1);
-        let remaining_length = 0;
-        vec.push(remaining_length);
-        vec
     }
 }
 
 #[derive(Debug)]
 pub struct PingRespPacket {
-    pub packet_type: ControlPacketType,
-    pub packet_flags: u8,
-    pub remaining_length: u32,
+    pub fixed_header: FixedHeader,
 }
 
 impl From<&[u8]> for PingRespPacket {
     fn from(bytes: &[u8]) -> Self {
         PingRespPacket {
-            packet_type: ControlPacketType::from((bytes[0] >> 4) & 0x0f),
-            packet_flags: bytes[0] & 0xf0,
-            remaining_length: bytes[1].into(),
+            fixed_header: FixedHeader::from(bytes),
         }
+    }
+}
+
+impl Encodable for PingRespPacket {
+    fn encode(self) -> Vec<u8> {
+        self.fixed_header.encode()
     }
 }
 
 impl PingRespPacket {
     pub fn new() -> PingRespPacket {
         PingRespPacket {
-            packet_type: ControlPacketType::PingResp,
-            packet_flags: ControlPacketFlags::PING_RESP_FLAGS,
-            remaining_length: 0,
+            fixed_header: FixedHeader {
+                packet_type: ControlPacketType::PingResp,
+                packet_flags: ControlPacketFlags::PING_RESP_FLAGS,
+                remaining_length: 0,
+            },
         }
-    }
-
-    pub fn encode(self) -> Vec<u8> {
-        let mut vec: Vec<u8> = Vec::new();
-        // Fixed Header
-        let packet_type_repr: u8 = self.packet_type.into();
-        let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
-        vec.push(fixed_header_byte1);
-        let remaining_length = 0;
-        vec.push(remaining_length);
-        vec
     }
 }
 
@@ -69,19 +60,22 @@ impl PingRespPacket {
 mod ping_req_packet_tests {
     use crate::{
         control_packets::{ControlPacketFlags, ControlPacketType},
-        ping_packets::PingReqPacket,
+        ping_packets::{Encodable, PingReqPacket},
     };
 
     #[test]
     fn create_test() {
         let ping_req_packet = PingReqPacket::new();
 
-        assert_eq!(ping_req_packet.packet_type, ControlPacketType::PingReq);
         assert_eq!(
-            ping_req_packet.packet_flags,
+            ping_req_packet.fixed_header.packet_type,
+            ControlPacketType::PingReq
+        );
+        assert_eq!(
+            ping_req_packet.fixed_header.packet_flags,
             ControlPacketFlags::PING_REQ_FLAGS
         );
-        assert_eq!(ping_req_packet.remaining_length, 0);
+        assert_eq!(ping_req_packet.fixed_header.remaining_length, 0);
     }
 
     #[test]
@@ -99,19 +93,22 @@ mod ping_req_packet_tests {
 mod ping_resp_packet_tests {
     use crate::{
         control_packets::{ControlPacketFlags, ControlPacketType},
-        ping_packets::PingRespPacket,
+        ping_packets::{Encodable, PingRespPacket},
     };
 
     #[test]
     fn create_test() {
         let ping_resp_packet = PingRespPacket::new();
 
-        assert_eq!(ping_resp_packet.packet_type, ControlPacketType::PingResp);
         assert_eq!(
-            ping_resp_packet.packet_flags,
+            ping_resp_packet.fixed_header.packet_type,
+            ControlPacketType::PingResp
+        );
+        assert_eq!(
+            ping_resp_packet.fixed_header.packet_flags,
             ControlPacketFlags::PING_RESP_FLAGS
         );
-        assert_eq!(ping_resp_packet.remaining_length, 0);
+        assert_eq!(ping_resp_packet.fixed_header.remaining_length, 0);
     }
 
     #[test]

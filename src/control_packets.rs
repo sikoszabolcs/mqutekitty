@@ -229,6 +229,39 @@ mod remaining_length_conversion_tests {
     }
 }
 
+pub(crate) trait Encodable {
+    fn encode(self) -> Vec<u8>;
+}
+
+#[derive(Debug)]
+pub struct FixedHeader {
+    pub packet_type: ControlPacketType,
+    pub packet_flags: u8,
+    pub remaining_length: u32,
+}
+
+impl From<&[u8]> for FixedHeader {
+    fn from(bytes: &[u8]) -> Self {
+        FixedHeader {
+            packet_type: ControlPacketType::from((bytes[0] >> 4) & 0x0f),
+            packet_flags: bytes[0] & 0xf0,
+            remaining_length: bytes[1].into(),
+        }
+    }
+}
+
+impl Encodable for FixedHeader {
+    fn encode(self) -> Vec<u8> {
+        let mut vec: Vec<u8> = Vec::new();
+        let packet_type_repr: u8 = self.packet_type.into();
+        let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
+        vec.push(fixed_header_byte1);
+        let remaining_length = 0;
+        vec.push(remaining_length);
+        vec
+    }
+}
+
 // 2.3. Variable header
 // 2.3.1 Packet identifier
 //  ----------------------------------------------------------------------------------------

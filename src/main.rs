@@ -1,10 +1,15 @@
+use core::time;
+use ctrlc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 pub(crate) use std::{
     io::{self, BufRead, Write},
     net::TcpStream,
 };
 
 use connect_packet::ConnectPacket;
-use control_packets::ControlPacketType;
+use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
 
@@ -125,7 +130,7 @@ impl MyQuteKittyClient {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> io::Result<()> {
     println!("My Qute kiTTy v0.0.1");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣿⣿⡷⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣿⡿⠋⠈⠻⣮⣳⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀");
@@ -151,22 +156,22 @@ async fn main() {
     let flags = ConnectFlagsBuilder::new().with_clean_session().build();
     let mut mqtt_client = MyQuteKittyClient::new(flags.into());
     let server_address = String::from("127.0.0.1:1883");
-    match mqtt_client.connect(server_address) {
-        Ok(_) => {
-            println!("connected to {:?}", mqtt_client.server_address);
+    mqtt_client.connect(server_address)?;
 
-            match mqtt_client.ping() {
-                Ok(_) => println!("ping ok"),
-                Err(error) => println!("ping error {}", error),
-            }
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
 
-            match mqtt_client.disconnect() {
-                Ok(_) => println!("disconnected"),
-                Err(error) => println!("error on disconnect {}", error),
-            }
-        }
-        Err(error) => {
-            println!("error connecting to server {:?}", error);
-        }
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    while running.load(Ordering::SeqCst) {
+        mqtt_client.ping()?;
+        thread::sleep(time::Duration::from_secs(5));
     }
+
+    mqtt_client.disconnect()?;
+
+    Ok(())
 }

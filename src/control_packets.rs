@@ -245,7 +245,7 @@ impl From<&[u8]> for FixedHeader {
         FixedHeader {
             packet_type: ControlPacketType::from((bytes[0] >> 4) & 0x0f),
             packet_flags: bytes[0] & 0xf0,
-            remaining_length: bytes[1].into(),
+            remaining_length: decode_remaining_length(&bytes[1..]).unwrap(),
         }
     }
 }
@@ -256,8 +256,8 @@ impl Encodable for FixedHeader {
         let packet_type_repr: u8 = self.packet_type.into();
         let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
         vec.push(fixed_header_byte1);
-        let remaining_length = 0;
-        vec.push(remaining_length);
+        let mut remaining_length = encode_remaining_length(self.remaining_length).unwrap();
+        vec.append(&mut remaining_length);
         vec
     }
 }

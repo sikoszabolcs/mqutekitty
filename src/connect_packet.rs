@@ -1,4 +1,6 @@
-use crate::control_packets::{encode_remaining_length, ControlPacketFlags, ControlPacketType};
+use crate::control_packets::{
+    encode_remaining_length, ControlPacketFlags, ControlPacketType,
+};
 
 // 3. MQTT Control Packets
 // 3.1. CONNECT - Client requests a connection to a Server
@@ -106,33 +108,33 @@ impl ConnectFlagsBuilder {
         ConnectFlagsBuilder::default()
     }
 
-    pub fn with_user_name(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn user_name(&mut self) -> &mut ConnectFlagsBuilder {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::USER_NAME_MASK;
         self
     }
 
-    pub fn with_password(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn password(&mut self) -> &mut ConnectFlagsBuilder {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::PASSWORD_MASK;
         self
     }
 
-    pub fn with_will_retain(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn will_retain(&mut self) -> &mut ConnectFlagsBuilder {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_RETAIN_MASK;
         self
     }
 
-    pub fn with_will_qos(&mut self, qos: u8) -> &mut ConnectFlagsBuilder {
+    pub fn will_qos(&mut self, qos: u8) -> &mut ConnectFlagsBuilder {
         assert!(qos < 3);
         self.byte_rep = self.byte_rep | ((qos << 3u8) & ConnectFlagsBuilder::WILL_QOS_MASK);
         self
     }
 
-    pub fn with_will_flag(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn will_flag(&mut self) -> &mut ConnectFlagsBuilder {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_FLAG_MASK;
         self
     }
 
-    pub fn with_clean_session(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn clean_session(&mut self) -> &mut ConnectFlagsBuilder {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::CLEAN_SESSION_MASK;
         self
     }
@@ -151,67 +153,67 @@ mod connect_flags_tests {
 
     #[test]
     fn user_name_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_user_name().build();
+        let flags = ConnectFlagsBuilder::new().user_name().build();
         assert_eq!(flags, 0b1000_0000.into())
     }
 
     #[test]
     fn password_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_password().build();
+        let flags = ConnectFlagsBuilder::new().password().build();
         assert_eq!(flags, 0b0100_0000.into())
     }
 
     #[test]
     fn will_retain_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_will_retain().build();
+        let flags = ConnectFlagsBuilder::new().will_retain().build();
         assert_eq!(flags, 0b0010_0000.into())
     }
 
     #[test]
     fn will_qos_2_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_will_qos(2).build();
+        let flags = ConnectFlagsBuilder::new().will_qos(2).build();
         assert_eq!(flags, 0b0001_0000.into())
     }
 
     #[test]
     fn will_qos_1_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_will_qos(1).build();
+        let flags = ConnectFlagsBuilder::new().will_qos(1).build();
         assert_eq!(flags, 0b0000_1000.into())
     }
 
     #[test]
     fn will_qos_0_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_will_qos(0).build();
+        let flags = ConnectFlagsBuilder::new().will_qos(0).build();
         assert_eq!(flags, 0b0000_0000.into())
     }
 
     #[test]
     fn will_flag_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_will_flag().build();
+        let flags = ConnectFlagsBuilder::new().will_flag().build();
         assert_eq!(flags, 0b0000_0100.into())
     }
 
     #[test]
     fn clean_session_build_test() {
-        let flags = ConnectFlagsBuilder::new().with_clean_session().build();
+        let flags = ConnectFlagsBuilder::new().clean_session().build();
         assert_eq!(flags, 0b0000_0010.into())
     }
 
     #[test]
     #[should_panic]
     fn will_qos_3_build_test() {
-        let _flags = ConnectFlagsBuilder::new().with_will_qos(3).build();
+        let _flags = ConnectFlagsBuilder::new().will_qos(3).build();
     }
 
     #[test]
     fn build_test() {
         let flags = ConnectFlagsBuilder::new()
-            .with_user_name()
-            .with_password()
-            .with_will_retain()
-            .with_will_qos(2)
-            .with_will_flag()
-            .with_clean_session()
+            .user_name()
+            .password()
+            .will_retain()
+            .will_qos(2)
+            .will_flag()
+            .clean_session()
             .build();
 
         assert_eq!(flags, 0b1111_0110.into());

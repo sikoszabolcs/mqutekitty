@@ -13,7 +13,7 @@ use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
 
-use crate::{conn_ack_packet::ConnAck, connect_packet::ConnectFlagsBuilder};
+use crate::{connect_packet::ConnectFlagsBuilder};
 
 pub mod conn_ack_packet;
 pub mod connect_packet;
@@ -44,7 +44,7 @@ impl MyQuteKittyClient {
                 let packet_type: u8 = (received[0] & 0xf0) >> 4;
                 match packet_type.into() {
                     ControlPacketType::ConnAck => {
-                        let conn_ack_packet = ConnAck::from_bytes(&received);
+                        let conn_ack_packet: Vec<u8> = received.into();
                         println!("received a {:?}", conn_ack_packet);
                     }
                     ControlPacketType::Connect => todo!(),
@@ -153,7 +153,7 @@ async fn main() -> io::Result<()> {
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣆⠀⠀⠀⠀⠀⠀⢀⣀⣠⣤⣶⣾⣿⣿⣿⣿⣤⣄⣀⡀⠀⠀⠀⣿");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣻⣷⣶⣾⣿⣿⡿⢯⣛⣛⡋⠁⠀⠀⠉⠙⠛⠛⠿⣿⣿⡷⣶⣿");
 
-    let flags = ConnectFlagsBuilder::new().with_clean_session().build();
+    let flags = ConnectFlagsBuilder::new().clean_session().build();
     let mut mqtt_client = MyQuteKittyClient::new(flags.into());
     let server_address = String::from("127.0.0.1:1883");
     mqtt_client.connect(server_address)?;

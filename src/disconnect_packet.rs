@@ -29,7 +29,7 @@ impl Encodable for DisconnectPacket {
 mod disconnect_packet_tests {
     use crate::{
         control_packets::{ControlPacketFlags, ControlPacketType, Encodable},
-        disconnect_packet::DisconnectPacket
+        disconnect_packet::DisconnectPacket,
     };
 
     #[test]

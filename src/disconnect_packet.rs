@@ -20,7 +20,7 @@ impl DisconnectPacket {
 }
 
 impl Encodable for DisconnectPacket {
-    fn encode(self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         self.fixed_header.encode()
     }
 }

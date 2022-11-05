@@ -1,6 +1,7 @@
-use crate::control_packets::{
-    encode_remaining_length, ControlPacketFlags, ControlPacketType,
-};
+use core::time;
+use std::{error::Error, fmt};
+
+use crate::control_packets::{ControlPacketFlags, ControlPacketType, Encodable, FixedHeader};
 
 // 3. MQTT Control Packets
 // 3.1. CONNECT - Client requests a connection to a Server
@@ -27,19 +28,13 @@ use crate::control_packets::{
 // | byte 6 |       'T'      | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 |
 // ----------------------------------------------------------
 
+#[derive(Clone, Copy)]
 pub struct ProtocolName<'a> {
     pub length: u16,
     pub name: &'a str,
 }
 
-impl<'a> ProtocolName<'a> {}
-
-const MQTT: &str = "MQTT";
-
-const MQTT_PROTOCOL_NAME: ProtocolName = ProtocolName {
-    length: 4,
-    name: MQTT,
-};
+const MQTT_PROTOCOL_NAME: &'static str = "MQTT";
 
 // 3.1.2.1. Protocol Level
 //  ---------------------------------------------------------
@@ -47,6 +42,7 @@ const MQTT_PROTOCOL_NAME: ProtocolName = ProtocolName {
 //  ---------------------------------------------------------
 // | byte 7 |     Level(4)   | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |
 //  ---------------------------------------------------------
+#[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum ProtocolLevel {
     V3_1 = 3,
@@ -104,37 +100,37 @@ impl ConnectFlagsBuilder {
     const WILL_FLAG_MASK: u8 = 0b0000_0100;
     const CLEAN_SESSION_MASK: u8 = 0b0000_0010;
 
-    pub fn new() -> ConnectFlagsBuilder {
+    pub fn new() -> Self {
         ConnectFlagsBuilder::default()
     }
 
-    pub fn user_name(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn user_name(&mut self) -> &mut Self {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::USER_NAME_MASK;
         self
     }
 
-    pub fn password(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn password(&mut self) -> &mut Self {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::PASSWORD_MASK;
         self
     }
 
-    pub fn will_retain(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn will_retain(&mut self) -> &mut Self {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_RETAIN_MASK;
         self
     }
 
-    pub fn will_qos(&mut self, qos: u8) -> &mut ConnectFlagsBuilder {
+    pub fn will_qos(&mut self, qos: u8) -> &mut Self {
         assert!(qos < 3);
         self.byte_rep = self.byte_rep | ((qos << 3u8) & ConnectFlagsBuilder::WILL_QOS_MASK);
         self
     }
 
-    pub fn will_flag(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn will_flag(&mut self) -> &mut Self {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::WILL_FLAG_MASK;
         self
     }
 
-    pub fn clean_session(&mut self) -> &mut ConnectFlagsBuilder {
+    pub fn clean_session(&mut self) -> &mut Self {
         self.byte_rep = self.byte_rep | ConnectFlagsBuilder::CLEAN_SESSION_MASK;
         self
     }
@@ -241,109 +237,293 @@ mod connect_flags_tests {
 // whose presence is determined by the flags in the variable header.
 // These fields, if present, MUST appear in the order
 // Client Identifier, Will Topic, Will Message, User Name, Password [MQTT-3.1.3-1].
-pub struct ConnectPacket<'a> {
-    pub packet_type: ControlPacketType, // 4 bits + 4 bits reserved
-    pub packet_flags: u8,
-    pub remaining_length: u32, // up to 4 bytes
-    pub protocol_name: ProtocolName<'a>,
+
+#[derive(Debug, Clone)]
+pub struct ErrorBuildingConnectPacket;
+impl fmt::Display for ErrorBuildingConnectPacket {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error building connect packet")
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum QoS {
+    AtMostOnce = 0,
+    AtLeastOnce = 1,
+    ExactlyOnce = 2,
+}
+
+impl From<u8> for QoS {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => QoS::AtMostOnce,
+            1 => QoS::AtLeastOnce,
+            2 => QoS::ExactlyOnce,
+            _ => QoS::AtMostOnce, // defaults to at most once on invalid value
+        }
+    }
+}
+
+impl From<QoS> for u8 {
+    fn from(value: QoS) -> Self {
+        match value {
+            QoS::AtMostOnce => 0,
+            QoS::AtLeastOnce => 1,
+            QoS::ExactlyOnce => 2,
+        }
+    }
+}
+
+pub struct Builder {
+    user_name: Option<String>,
+    password: Option<String>,
+    protocol_name: String,
+    protocol_level: Option<ProtocolLevel>,
+    will_topic: Option<String>,
+    will_message: Option<String>,
+    will_qos: Option<QoS>,
+    keep_alive_interval: time::Duration,
+    client_id: Option<String>,
+    clean_session: bool,
+    will_retain: bool,
+}
+
+const U16_SIZE_IN_BYTES: usize = 2;
+const U8_SIZE_IN_BYTES: usize = 1;
+
+impl Builder {
+    pub fn new() -> Self {
+        Builder {
+            user_name: None,
+            password: None,
+            protocol_name: MQTT_PROTOCOL_NAME.to_string(),
+            protocol_level: Some(ProtocolLevel::V3_1_1), // default to v3.1.1
+            will_retain: false,
+            will_topic: None,
+            will_message: None,
+            will_qos: Some(QoS::AtMostOnce), // default to 0 (at most once)
+            keep_alive_interval: time::Duration::from_secs(60), // default to 60 seconds
+            client_id: None,
+            clean_session: false,
+        }
+    }
+
+    pub fn user_name(&mut self, user_name: String) -> &mut Self {
+        self.user_name = Some(user_name);
+        self
+    }
+
+    pub fn password(&mut self, password: String) -> &mut Self {
+        self.password = Some(password);
+        self
+    }
+
+    pub fn protocol_level(&mut self, protocol: ProtocolLevel) -> &mut Self {
+        self.protocol_level = Some(protocol);
+        self
+    }
+
+    pub fn keep_alive_interval(&mut self, keep_alive: time::Duration) -> &mut Self {
+        self.keep_alive_interval = keep_alive;
+        self
+    }
+
+    pub fn client_id(&mut self, client_id: &str) -> &mut Self {
+        self.client_id = Some(client_id.to_string());
+        self
+    }
+
+    pub fn clean_session(&mut self) -> &mut Self {
+        self.clean_session = true;
+        self
+    }
+
+    pub fn will_retain(&mut self) -> &mut Self {
+        self.will_retain = true;
+        self
+    }
+
+    pub fn will_topic(&mut self, will_topic: &str) -> &mut Self {
+        self.will_topic = Some(will_topic.to_string());
+        self
+    }
+
+    pub fn will_message(&mut self, will_message: &str) -> &mut Self {
+        self.will_message = Some(will_message.to_string());
+        self
+    }
+
+    pub fn will_qos(&mut self, qos: u8) -> &mut Self {
+        self.will_qos = Some(qos.into());
+        self
+    }
+
+    pub fn calc_flags(&self) -> u8 {
+        let mut flags = 0b0000_0000;
+        flags = flags
+            | if self.user_name.is_some() {
+                ConnectFlagsBuilder::USER_NAME_MASK
+            } else {
+                0
+            };
+        flags = flags
+            | if self.password.is_some() && self.user_name.is_some() {
+                ConnectFlagsBuilder::PASSWORD_MASK
+            } else {
+                0
+            };
+        flags = flags
+            | if self.will_retain == true {
+                ConnectFlagsBuilder::WILL_RETAIN_MASK
+            } else {
+                0
+            };
+
+        let will_qos = match self.will_qos {
+            Some(qos) => qos,
+            None => QoS::AtLeastOnce,
+        };
+        flags = flags | ((will_qos as u8) << 3u8) & ConnectFlagsBuilder::WILL_QOS_MASK;
+
+        flags = flags
+            | if self.will_message.is_some() && self.will_topic.is_some() {
+                ConnectFlagsBuilder::WILL_FLAG_MASK
+            } else {
+                0
+            };
+        flags = flags
+            | if self.clean_session {
+                ConnectFlagsBuilder::CLEAN_SESSION_MASK
+            } else {
+                0
+            };
+        flags
+    }
+
+    pub fn calc_remaining_length(&self) -> usize {
+        let mut remaining_length = 0;
+        // Variable header - protocol name: 2 bytes for the length prefix + string length
+        remaining_length += U16_SIZE_IN_BYTES + &self.protocol_name.len();
+        // Variable header - byte 7 - protocol level
+        remaining_length += U8_SIZE_IN_BYTES;
+        // Variable header - byte 8 - connect flags
+        remaining_length += U8_SIZE_IN_BYTES;
+        // Variable header - byte 9  - keep alive MSB
+        // Variable header - byte 10 - keep alive LSB
+        remaining_length += U16_SIZE_IN_BYTES;
+
+        // Payload - client id - first entry
+        remaining_length += match &self.client_id {
+            Some(client_id) => U16_SIZE_IN_BYTES + client_id.len(),
+            None => 0,
+        };
+
+        // Payload - will topic - second entry
+        remaining_length += match &self.will_topic {
+            Some(will_topic) => U16_SIZE_IN_BYTES + will_topic.len(),
+            None => 0,
+        };
+
+        // Payload - will message - third entry
+        remaining_length += match &self.will_message {
+            Some(will_message) => U16_SIZE_IN_BYTES + will_message.len(),
+            None => 0,
+        };
+
+        // Payload - user name - fourth entry
+        remaining_length += match &self.user_name {
+            Some(user_name) => U16_SIZE_IN_BYTES + user_name.len(),
+            None => 0,
+        };
+
+        // Payload - password - fifth entry
+        remaining_length += match &self.password {
+            Some(password) => U16_SIZE_IN_BYTES + password.len(),
+            None => 0,
+        };
+        remaining_length
+    }
+
+    pub fn build(&mut self) -> Result<ConnectPacket, Box<dyn Error>> {
+        let remaining_length = self.calc_remaining_length();
+        let flags = self.calc_flags();
+
+        Ok(ConnectPacket {
+            fixed_header: FixedHeader {
+                packet_type: ControlPacketType::Connect,
+                packet_flags: ControlPacketFlags::CONNECT_FLAGS,
+                remaining_length,
+            },
+            protocol_name: self.protocol_name.clone(),
+            protocol_level: self.protocol_level.take().unwrap(),
+            connect_flags: flags.into(),
+            keep_alive: self.keep_alive_interval.as_secs().try_into()?, // max keep alive seconds is 65535
+            client_id: self.client_id.take().unwrap(), // todo: I'm not sure if this is a good idea
+        })
+    }
+}
+
+pub struct ConnectPacket {
+    pub fixed_header: FixedHeader,
+    pub protocol_name: String,
     pub protocol_level: ProtocolLevel,
     pub connect_flags: ConnectFlags,
     pub keep_alive: u16,
     pub client_id: String,
 }
 
-impl<'a> ConnectPacket<'a> {
-    pub fn new(connect_flags: u8) -> Self {
-        Self {
-            packet_type: ControlPacketType::Connect,
-            packet_flags: ControlPacketFlags::CONNECT_FLAGS,
-            remaining_length: 0,
-            protocol_name: MQTT_PROTOCOL_NAME,
-            protocol_level: ProtocolLevel::V3_1_1,
-            connect_flags: connect_flags.into(),
-            keep_alive: 10, // for 10 seconds
-            // payload
-            client_id: String::from("mqutekitty_client"),
-        }
-    }
-
+impl ConnectPacket {
     pub fn encode(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
-
-        // Fixed Header
-        let packet_type_repr: u8 = self.packet_type as u8;
-        let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;
-        vec.push(fixed_header_byte1);
-        let mut remaining_length = 0;
+        vec.append(&mut self.fixed_header.encode());
 
         // Variable Header
-        vec.push(0); // variable header byte 1: Length MSB (0)
-        remaining_length += 1;
-        vec.push(4); // variable header byte 2: Length LSB (4)
-        remaining_length += 1;
-        vec.push(b'M');
-        remaining_length += 1;
-        vec.push(b'Q');
-        remaining_length += 1;
-        vec.push(b'T');
-        remaining_length += 1;
-        vec.push(b'T');
-        remaining_length += 1;
+        vec.extend_from_slice(&(self.protocol_name.len() as u16).to_be_bytes());
+        vec.append(&mut vec![b'M', b'Q', b'T', b'T']);
         vec.push(self.protocol_level as u8); // vh byte 7
-        remaining_length += 1;
         vec.push(self.connect_flags.into()); // vh byte 8 - connected flags
-        remaining_length += 1;
-        for keep_alive_part in self.keep_alive.to_be_bytes() {
-            vec.push(keep_alive_part);
-            remaining_length += 1;
-        }
-        let client_id_size = self.client_id.len() as u16;
-        for client_id_size_part in client_id_size.to_be_bytes() {
-            vec.push(client_id_size_part);
-            remaining_length += 1;
-        }
-        for client_id_part in self.client_id.as_bytes() {
-            vec.push(client_id_part.clone());
-            remaining_length += 1;
-        }
-
-        let encode_result = encode_remaining_length(remaining_length);
-        let encoded_remaining_length = match encode_result {
-            Ok(length) => length,
-            Err(error) => panic!("Error encoding ConnectPacket: {}", error),
-        };
-
-        let mut index = 1;
-        for remaining_length_part in encoded_remaining_length {
-            vec.insert(index, remaining_length_part);
-            index += 1;
-        }
-
+        vec.extend_from_slice(&self.keep_alive.to_be_bytes());
+        vec.extend_from_slice(&(self.client_id.len() as u16).to_be_bytes());
+        vec.extend_from_slice(self.client_id.as_bytes());
         return vec;
     }
 }
 
 #[cfg(test)]
 mod connect_packet_tests {
-    use crate::{connect_packet::ConnectPacket, control_packets::ControlPacketType};
+    use crate::{
+        connect_packet::{self},
+        control_packets::ControlPacketType,
+    };
 
     #[test]
     fn create_test() {
-        let connect_packet = ConnectPacket::new(2u8);
+        let connect_packet = connect_packet::Builder::new()
+            .client_id("mqutekitty_client")
+            .clean_session()
+            .build()
+            .unwrap();
 
-        assert_eq!(connect_packet.packet_type, ControlPacketType::Connect);
-        assert_eq!(connect_packet.remaining_length, 0);
-        assert_eq!(connect_packet.protocol_name.length, 4);
-        assert_eq!(connect_packet.protocol_name.name, String::from("MQTT"));
+        assert_eq!(
+            connect_packet.fixed_header.packet_type,
+            ControlPacketType::Connect
+        );
+        assert_eq!(connect_packet.fixed_header.remaining_length, 29);
+        assert_eq!(connect_packet.protocol_name.len(), 4);
+        assert_eq!(connect_packet.protocol_name, String::from("MQTT"));
         assert_eq!(connect_packet.connect_flags, 2u8.into());
-        assert_eq!(connect_packet.keep_alive, 10);
+        assert_eq!(connect_packet.keep_alive, 60);
         assert_eq!(connect_packet.client_id, "mqutekitty_client");
     }
 
     #[test]
     fn encode_test() {
-        let connect_packet = ConnectPacket::new(2u8);
-
+        let connect_packet = connect_packet::Builder::new()
+            .clean_session()
+            .client_id("mqutekitty_client")
+            .build()
+            .unwrap();
         let connect_packet_bytes: Vec<u8> = connect_packet.encode();
 
         println!("{:?}", connect_packet_bytes);
@@ -359,7 +539,7 @@ mod connect_packet_tests {
         assert_eq!(connect_packet_bytes[8], 0x04); // packet level
         assert_eq!(connect_packet_bytes[9], 0x02); // connect flags
         assert_eq!(connect_packet_bytes[10], 0); // keep alive MSB
-        assert_eq!(connect_packet_bytes[11], 10); // keep alive LSB
+        assert_eq!(connect_packet_bytes[11], 60); // keep alive LSB
         assert_eq!(connect_packet_bytes[12], 0); // client_id length MSB
         assert_eq!(connect_packet_bytes[13], 17); // client_id length LSB
         assert_eq!(connect_packet_bytes[14], 109); // 'm'

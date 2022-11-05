@@ -136,7 +136,7 @@ impl fmt::Display for EncodeError {
     }
 }
 
-pub fn encode_remaining_length(mut length: u32) -> Result<Vec<u8>, EncodeError> {
+pub fn encode_remaining_length(mut length: usize) -> Result<Vec<u8>, EncodeError> {
     let mut vec: Vec<u8> = Vec::new();
 
     loop {
@@ -230,14 +230,14 @@ mod remaining_length_conversion_tests {
 }
 
 pub(crate) trait Encodable {
-    fn encode(self) -> Vec<u8>;
+    fn encode(&self) -> Vec<u8>;
 }
 
 #[derive(Debug)]
 pub struct FixedHeader {
     pub packet_type: ControlPacketType,
     pub packet_flags: u8,
-    pub remaining_length: u32,
+    pub remaining_length: usize,
 }
 
 impl From<&[u8]> for FixedHeader {
@@ -245,13 +245,13 @@ impl From<&[u8]> for FixedHeader {
         FixedHeader {
             packet_type: ControlPacketType::from((bytes[0] >> 4) & 0x0f),
             packet_flags: bytes[0] & 0xf0,
-            remaining_length: decode_remaining_length(&bytes[1..]).unwrap(),
+            remaining_length: decode_remaining_length(&bytes[1..]).unwrap_or(0) as usize,
         }
     }
 }
 
 impl Encodable for FixedHeader {
-    fn encode(self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
         let packet_type_repr: u8 = self.packet_type.into();
         let fixed_header_byte1: u8 = packet_type_repr << 4u8 | self.packet_flags & 0b00001111;

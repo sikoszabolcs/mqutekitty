@@ -8,12 +8,12 @@ pub(crate) use std::{
     net::TcpStream,
 };
 
-use connect_packet::ConnectPacket;
+//use connect_packet::ConnectPacket;
 use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
 
-use crate::{connect_packet::ConnectFlagsBuilder};
+//use crate::connect_packet::ConnectFlagsBuilder;
 
 pub mod conn_ack_packet;
 pub mod connect_packet;
@@ -22,16 +22,17 @@ pub mod disconnect_packet;
 pub mod ping_packets;
 
 pub struct MyQuteKittyClient {
-    connect_flags: u8,
-    server_address: String,
+    //connect_flags: u8,
+    client_id: String,
+    server_address: Option<String>,
     tcp_stream: Option<TcpStream>,
 }
 
 impl MyQuteKittyClient {
-    pub fn new(connect_flags: u8) -> Self {
+    pub fn new(client_id: &str) -> Self {
         return MyQuteKittyClient {
-            connect_flags,
-            server_address: "".to_string(),
+            client_id: client_id.to_owned(),
+            server_address: None,
             tcp_stream: None,
         };
     }
@@ -71,10 +72,14 @@ impl MyQuteKittyClient {
     }
 
     pub fn connect(&mut self, address: String) -> Result<(), std::io::Error> {
-        self.server_address = address;
-        match TcpStream::connect(&self.server_address) {
+        self.server_address = Some(address);
+        match TcpStream::connect(self.server_address.as_ref().unwrap()) {
             Ok(mut stream) => {
-                let connect_packet_bytes = ConnectPacket::new(self.connect_flags).encode();
+                let connect_packet_bytes = connect_packet::Builder::new()
+                    .client_id(&self.client_id)
+                    .build()
+                    .unwrap()
+                    .encode();
                 match stream.write_all(&connect_packet_bytes) {
                     Ok(_) => {
                         self.tcp_stream = Some(stream);
@@ -153,8 +158,7 @@ async fn main() -> io::Result<()> {
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣆⠀⠀⠀⠀⠀⠀⢀⣀⣠⣤⣶⣾⣿⣿⣿⣿⣤⣄⣀⡀⠀⠀⠀⣿");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣻⣷⣶⣾⣿⣿⡿⢯⣛⣛⡋⠁⠀⠀⠉⠙⠛⠛⠿⣿⣿⡷⣶⣿");
 
-    let flags = ConnectFlagsBuilder::new().clean_session().build();
-    let mut mqtt_client = MyQuteKittyClient::new(flags.into());
+    let mut mqtt_client = MyQuteKittyClient::new("mqutekitty-client");
     let server_address = String::from("127.0.0.1:1883");
     mqtt_client.connect(server_address)?;
 

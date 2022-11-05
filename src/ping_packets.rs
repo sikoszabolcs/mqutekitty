@@ -8,7 +8,7 @@ pub struct PingReqPacket {
 }
 
 impl Encodable for PingReqPacket {
-    fn encode(self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         self.fixed_header.encode()
     }
 }
@@ -39,7 +39,7 @@ impl From<&[u8]> for PingRespPacket {
 }
 
 impl Encodable for PingRespPacket {
-    fn encode(self) -> Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
         self.fixed_header.encode()
     }
 }

@@ -1,19 +1,14 @@
-use core::time;
-use ctrlc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
+use std::time::Duration;
+use futures::future::abortable;
+use tokio::time::interval;
 pub(crate) use std::{
     io::{self, BufRead, Write},
     net::TcpStream,
 };
-
-//use connect_packet::ConnectPacket;
+use tokio::signal;
 use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
-
-//use crate::connect_packet::ConnectFlagsBuilder;
 
 pub mod conn_ack_packet;
 pub mod connect_packet;
@@ -22,7 +17,6 @@ pub mod disconnect_packet;
 pub mod ping_packets;
 
 pub struct MyQuteKittyClient {
-    //connect_flags: u8,
     client_id: String,
     server_address: Option<String>,
     tcp_stream: Option<TcpStream>,
@@ -157,25 +151,33 @@ async fn main() -> io::Result<()> {
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⠀⠀⠀⠀⠀⠀⢸⣧");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣆⠀⠀⠀⠀⠀⠀⢀⣀⣠⣤⣶⣾⣿⣿⣿⣿⣤⣄⣀⡀⠀⠀⠀⣿");
     println!("⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣻⣷⣶⣾⣿⣿⡿⢯⣛⣛⡋⠁⠀⠀⠉⠙⠛⠛⠿⣿⣿⡷⣶⣿");
-
+    
     let mut mqtt_client = MyQuteKittyClient::new("mqutekitty-client");
     let server_address = String::from("127.0.0.1:1883");
     mqtt_client.connect(server_address)?;
 
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
+    let (job, handle) = abortable(ping(mqtt_client));
+    tokio::spawn(job);
 
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
-
-    while running.load(Ordering::SeqCst) {
-        mqtt_client.ping()?;
-        thread::sleep(time::Duration::from_secs(5));
+    match signal::ctrl_c().await {
+        Ok(()) => {
+            println!("Got out!");
+            handle.abort();
+            mqtt_client.disconnect();
+        }
+        Err(err) => {
+            eprintln!("Unable to listen for shutdown signal: {}", err);
+            handle.abort();
+        }
     }
 
-    mqtt_client.disconnect()?;
-
     Ok(())
+}
+
+async fn ping(mut mqtt_client: MyQuteKittyClient) {
+    let mut interval = interval(Duration::from_secs(5));
+    loop {
+        interval.tick().await;
+        mqtt_client.ping();
+    }
 }

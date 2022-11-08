@@ -8,7 +8,7 @@ pub(crate) use std::{
     net::TcpStream,
 };
 use tokio::signal;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 use tracing_subscriber::EnvFilter;
 
 use crate::conn_ack_packet::ConnAck;
@@ -23,6 +23,33 @@ pub struct MyQuteKittyClient {
     client_id: String,
     server_address: Option<String>,
     tcp_stream: Option<TcpStream>,
+}
+
+impl Clone for MyQuteKittyClient {
+    fn clone(&self) -> Self {
+        let server_address_clone = match &self.server_address {
+            Some(address) => Some(address.to_string()),
+            None => None,
+        };
+
+        let tcp_stream_clone = match &self.tcp_stream {
+            Some(stream) => {
+                let stream_clone = stream.try_clone();
+                let x = match stream_clone {
+                    Ok(clone) => Some(clone),
+                    Err(_) => None,
+                };
+                x
+            }
+            None => None,
+        };
+
+        MyQuteKittyClient {
+            client_id: self.client_id.to_string(),
+            server_address: server_address_clone,
+            tcp_stream: tcp_stream_clone,
+        }
+    }
 }
 
 impl MyQuteKittyClient {
@@ -160,13 +187,14 @@ async fn main() -> Result<(), Report> {
     let mut mqtt_client = MyQuteKittyClient::new("mqutekitty-client");
     let server_address = String::from("127.0.0.1:1883");
     mqtt_client.connect(server_address)?;
+    let mut mqtt_client_clone = mqtt_client.clone();
 
     // TODO: shouldn't be spawning long running background operation on a tokio green thread, because it will block the event loop
-    let handle = tokio::spawn(async move {
+    let ping_task_handle = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             match mqtt_client.ping() {
-                Ok(_) => {}
+                Ok(_) => {debug!("Ping OK");}
                 Err(error) => {
                     error!("Error pinging MQTT server! {}", error);
                     break;
@@ -176,8 +204,11 @@ async fn main() -> Result<(), Report> {
     });
 
     tokio::select! {
-        _ = signal::ctrl_c() => {warn!("Exiting..")}
-        _ = handle => {info!("Pinged..")}
+        _ = signal::ctrl_c() => {
+            mqtt_client_clone.disconnect()?;
+            warn!("Exiting..");
+        }
+        _ = ping_task_handle => {info!("Pinged..")}
     };
 
     Ok(())
@@ -190,7 +221,7 @@ fn setup() -> Result<(), Report> {
     color_eyre::install()?;
 
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "info")
+        std::env::set_var("RUST_LOG", "debug")
     }
     tracing_subscriber::fmt::fmt()
         .with_env_filter(EnvFilter::from_default_env())

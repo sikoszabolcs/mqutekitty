@@ -476,16 +476,16 @@ pub struct ConnectPacket {
 impl ConnectPacket {
     pub fn encode(&self) -> Vec<u8> {
         let mut vec: Vec<u8> = Vec::new();
-        vec.append(&mut self.fixed_header.encode());
+        vec.extend_from_slice(&mut self.fixed_header.encode());
 
         // Variable Header
         vec.extend_from_slice(&(self.protocol_name.len() as u16).to_be_bytes());
-        vec.append(&mut vec![b'M', b'Q', b'T', b'T']);
+        vec.extend_from_slice(&mut vec![b'M', b'Q', b'T', b'T']);
         vec.push(self.protocol_level as u8); // vh byte 7
         vec.push(self.connect_flags.into()); // vh byte 8 - connected flags
         vec.extend_from_slice(&self.keep_alive.to_be_bytes());
         vec.extend_from_slice(&(self.client_id.len() as u16).to_be_bytes());
-        vec.extend_from_slice(self.client_id.as_bytes());
+        vec.extend_from_slice(&self.client_id.as_bytes());
         return vec;
     }
 }

@@ -2,6 +2,7 @@ use color_eyre::Report;
 use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
+use publish_packet::PublishPacket;
 use std::time::Duration;
 pub(crate) use std::{
     io::{self, BufRead, Write},
@@ -22,6 +23,7 @@ pub mod connect_packet;
 pub mod control_packets;
 pub mod disconnect_packet;
 pub mod ping_packets;
+pub mod publish_packet;
 
 pub struct MyQuteKittyClient {
     client_id: String,
@@ -145,7 +147,17 @@ impl MyQuteKittyClient {
         return Ok(());
     }
 
-    pub fn publish(&self, _topic: &str, _payload: &str) -> Result<(), std::io::Error> {
+    pub fn publish(&mut self, topic: &str, payload: &str) -> Result<(), std::io::Error> {
+        let publish_packet_bytes =
+            PublishPacket::new(0b0000_0000.into(), topic, payload.as_bytes()).encode();
+
+        if let Some(stream) = &mut self.tcp_stream {
+            match stream.write_all(&publish_packet_bytes) {
+                Ok(_) => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
+
         return Ok(());
     }
 
@@ -202,27 +214,29 @@ async fn main() -> Result<(), Report> {
     // So, we'll just use a normal std thread, which will loop and wait on a channel (timer_notification_channel).
     // Then, we'll have a very light weight async tokio task (timed_event_task), which will async wait on a tokio interval and engage the
     // timer notification channel on every timer tick. This will keep the tokio task event loop happy, because the processing in the tokio task is minimal.
-    let ping_thread = std::thread::spawn(move || loop {
-        match timer_notification_channel_rx.recv() {
-            Ok(_) => {
-                debug!("TNC received OK");
+    let ping_thread = std::thread::Builder::new()
+        .name("ping_thread".to_string())
+        .spawn(move || loop {
+            match timer_notification_channel_rx.recv() {
+                Ok(_) => {
+                    debug!("TNC received OK");
+                }
+                Err(error) => {
+                    error!("TNC errored out! {}", error);
+                    break;
+                }
             }
-            Err(error) => {
-                error!("TNC errored out! {}", error);
-                break;
-            }
-        }
 
-        match mqtt_client.ping() {
-            Ok(_) => {
-                debug!("Ping OK");
+            match mqtt_client.ping() {
+                Ok(_) => {
+                    debug!("Ping OK");
+                }
+                Err(error) => {
+                    error!("Error pinging MQTT server! {}", error);
+                    break;
+                }
             }
-            Err(error) => {
-                error!("Error pinging MQTT server! {}", error);
-                break;
-            }
-        }
-    });
+        });
 
     let timed_event_task = tokio::spawn(async move {
         loop {
@@ -238,6 +252,11 @@ async fn main() -> Result<(), Report> {
             };
         }
     });
+
+    match mqtt_client_clone.publish("myqutekitty/test", "first message"){
+        Ok(_) => debug!("Pub OK"),
+        Err(error) => error!("Error publishing! {:?}", error)
+    }
 
     tokio::select! {
         _ = signal::ctrl_c() => {

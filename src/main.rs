@@ -7,8 +7,12 @@ pub(crate) use std::{
     io::{self, BufRead, Write},
     net::TcpStream,
 };
-use tokio::signal;
-use tracing::{error, info, warn, debug};
+
+use tokio::{
+    signal,
+    time::{interval_at, Instant},
+};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::conn_ack_packet::ConnAck;
@@ -64,12 +68,12 @@ impl MyQuteKittyClient {
     pub fn read_packet(&mut self) -> Result<(), std::io::Error> {
         if let Some(stream) = &mut self.tcp_stream {
             let mut reader = io::BufReader::new(stream);
-            let received: Vec<u8> = reader.fill_buf().unwrap().to_vec();
+
+            let received: Vec<u8> = reader.fill_buf()?.to_vec();
             if received.len() > 0 {
                 let packet_type: u8 = (received[0] & 0xf0) >> 4;
                 match packet_type.into() {
                     ControlPacketType::ConnAck => {
-                        //let conn_ack_packet: Vec<u8> = received.into();
                         let conn_ack_packet = ConnAck::from(received.as_slice());
                         info!("received a {:?}", conn_ack_packet);
                     }
@@ -189,17 +193,49 @@ async fn main() -> Result<(), Report> {
     mqtt_client.connect(server_address)?;
     let mut mqtt_client_clone = mqtt_client.clone();
 
-    // TODO: shouldn't be spawning long running background operation on a tokio green thread, because it will block the event loop
-    let ping_task_handle = tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            match mqtt_client.ping() {
-                Ok(_) => {debug!("Ping OK");}
-                Err(error) => {
-                    error!("Error pinging MQTT server! {}", error);
-                    break;
-                }
+    let (timer_notification_channel_tx, timer_notification_channel_rx) = std::sync::mpsc::channel();
+    let instant = Instant::now();
+    let mut timer = interval_at(instant, Duration::from_secs(5));
+
+    // We have to perioically ping the MQTT server. Currently that operation is blocking (i.e. doesn't use async io (..I know)).
+    // We can't spawn it in a tokio task isn't a good practice, because we would end up blocking the event loop.
+    // So, we'll just use a normal std thread, which will loop and wait on a channel (timer_notification_channel).
+    // Then, we'll have a very light weight async tokio task (timed_event_task), which will async wait on a tokio interval and engage the
+    // timer notification channel on every timer tick. This will keep the tokio task event loop happy, because the processing in the tokio task is minimal.
+    let ping_thread = std::thread::spawn(move || loop {
+        match timer_notification_channel_rx.recv() {
+            Ok(_) => {
+                debug!("TNC received OK");
             }
+            Err(error) => {
+                error!("TNC errored out! {}", error);
+                break;
+            }
+        }
+
+        match mqtt_client.ping() {
+            Ok(_) => {
+                debug!("Ping OK");
+            }
+            Err(error) => {
+                error!("Error pinging MQTT server! {}", error);
+                break;
+            }
+        }
+    });
+
+    let timed_event_task = tokio::spawn(async move {
+        loop {
+            timer.tick().await;
+            match timer_notification_channel_tx.send(0) {
+                Ok(_) => {
+                    // life's good
+                    debug!("TNC send OK");
+                }
+                Err(error) => {
+                    error!("Error sending on TNC! {}", error);
+                }
+            };
         }
     });
 
@@ -208,8 +244,12 @@ async fn main() -> Result<(), Report> {
             mqtt_client_clone.disconnect()?;
             warn!("Exiting..");
         }
-        _ = ping_task_handle => {info!("Pinged..")}
+        _ = timed_event_task => {info!("Pinged..")}
     };
+
+    info!("Meow..?!");
+
+    drop(ping_thread);
 
     Ok(())
 }

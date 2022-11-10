@@ -148,8 +148,17 @@ impl MyQuteKittyClient {
     }
 
     pub fn publish(&mut self, topic: &str, payload: &str) -> Result<(), std::io::Error> {
-        let publish_packet_bytes =
-            PublishPacket::new(0b0000_0000.into(), topic, payload.as_bytes()).encode();
+        // let publish_packet_bytes =
+        //     PublishPacket::new(0b0000_0000.into(), topic, payload.as_bytes()).encode();
+
+        let publish_packet_bytes = 
+            publish_packet::Builder::new()
+            .packet_flags(0b0000_0000.into())
+            .topic_name(topic)
+            .payload(payload.as_bytes())
+            .build()
+            .unwrap()
+            .encode();
 
         if let Some(stream) = &mut self.tcp_stream {
             match stream.write_all(&publish_packet_bytes) {
@@ -253,9 +262,9 @@ async fn main() -> Result<(), Report> {
         }
     });
 
-    match mqtt_client_clone.publish("myqutekitty/test", "first message"){
+    match mqtt_client_clone.publish("myqutekitty/test", "first message") {
         Ok(_) => debug!("Pub OK"),
-        Err(error) => error!("Error publishing! {:?}", error)
+        Err(error) => error!("Error publishing! {:?}", error),
     }
 
     tokio::select! {

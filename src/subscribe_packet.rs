@@ -12,7 +12,7 @@ pub struct TopicFilter<'a> {
 
 pub struct Builder<'a> {
     fixed_header: FixedHeader,
-    packet_id: u16,
+    packet_id: u16, // must be a non-zero value
     topic_filters: Vec<TopicFilter<'a>>,
 }
 
@@ -24,7 +24,7 @@ impl<'a> Builder<'a> {
                 packet_flags: ControlPacketFlags::SUBSCRIBE_FLAGS,
                 remaining_length: 0,
             },
-            packet_id: 0,
+            packet_id: 1,
             topic_filters: vec![],
         }
     }
@@ -59,7 +59,7 @@ impl<'a> Builder<'a> {
 }
 pub struct SubscribePacket<'a> {
     fixed_header: FixedHeader,
-    packet_id: u16,
+    packet_id: u16, // must be a non-zero value
     topic_filters: &'a Vec<TopicFilter<'a>>,
 }
 

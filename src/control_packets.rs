@@ -233,7 +233,7 @@ pub(crate) trait Encodable {
     fn encode(&self) -> Vec<u8>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FixedHeader {
     pub packet_type: ControlPacketType,
     pub packet_flags: u8,
@@ -289,3 +289,11 @@ impl Encodable for FixedHeader {
 // | SUBACK         | Required |
 // | UNSUBSCRIBE    | Required |
 //  ---------------------------
+
+pub fn as_u16_be(array: &[u8]) -> u16 {
+    ((array[0] as u16) << 8) + ((array[1] as u16) << 0)
+}
+
+pub fn as_u16_le(array: &[u8]) -> u16 {
+    ((array[0] as u16) << 0) + ((array[1] as u16) << 8)
+}

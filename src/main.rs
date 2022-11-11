@@ -2,7 +2,8 @@ use color_eyre::Report;
 use control_packets::{ControlPacketType, Encodable};
 use disconnect_packet::DisconnectPacket;
 use ping_packets::{PingReqPacket, PingRespPacket};
-use publish_packet::PublishPacket;
+use subscribe_packet::TopicFilter;
+use std::sync::mpsc::{Sender, Receiver};
 use std::time::Duration;
 pub(crate) use std::{
     io::{self, BufRead, Write},
@@ -16,7 +17,7 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use crate::conn_ack_packet::ConnAck;
+use crate::{conn_ack_packet::ConnAck, publish_packet::PublishPacket};
 
 pub mod conn_ack_packet;
 pub mod connect_packet;
@@ -24,6 +25,7 @@ pub mod control_packets;
 pub mod disconnect_packet;
 pub mod ping_packets;
 pub mod publish_packet;
+pub mod subscribe_packet;
 
 pub struct MyQuteKittyClient {
     client_id: String,
@@ -80,7 +82,10 @@ impl MyQuteKittyClient {
                         info!("received a {:?}", conn_ack_packet);
                     }
                     ControlPacketType::Connect => todo!(),
-                    ControlPacketType::Publish => todo!(),
+                    ControlPacketType::Publish => {
+                        let publish_packet = PublishPacket::from(received.as_slice());
+                        info!("received a {:?}", publish_packet);
+                    }
                     ControlPacketType::PubAck => info!("Received a PubAck"),
                     ControlPacketType::PubRec => todo!(),
                     ControlPacketType::PubRel => todo!(),
@@ -139,7 +144,24 @@ impl MyQuteKittyClient {
         return Ok(());
     }
 
-    pub fn subscribe(&self, _topic: &str) -> Result<(), std::io::Error> {
+    pub fn subscribe(&mut self, topic: &str) -> Result<(), std::io::Error> {
+        let subscribe_packet_bytes = subscribe_packet::Builder::new()
+        .packet_id(1)    
+        .topic_filter(TopicFilter {
+                topic_name: topic,
+                requested_qos: connect_packet::QoS::AtMostOnce,
+            })
+            .build()
+            .unwrap()
+            .encode();
+
+        if let Some(stream) = &mut self.tcp_stream {
+            match stream.write_all(&subscribe_packet_bytes) {
+                Ok(_) => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
+
         return Ok(());
     }
 
@@ -148,11 +170,7 @@ impl MyQuteKittyClient {
     }
 
     pub fn publish(&mut self, topic: &str, payload: &str) -> Result<(), std::io::Error> {
-        // let publish_packet_bytes =
-        //     PublishPacket::new(0b0000_0000.into(), topic, payload.as_bytes()).encode();
-
-        let publish_packet_bytes = 
-            publish_packet::Builder::new()
+        let publish_packet_bytes = publish_packet::Builder::new()
             .packet_flags(0b0000_0000.into())
             .topic_name(topic)
             .payload(payload.as_bytes())
@@ -214,7 +232,7 @@ async fn main() -> Result<(), Report> {
     mqtt_client.connect(server_address)?;
     let mut mqtt_client_clone = mqtt_client.clone();
 
-    let (timer_notification_channel_tx, timer_notification_channel_rx) = std::sync::mpsc::channel();
+    let (timer_notification_channel_tx, timer_notification_channel_rx): (Sender<u32>, Receiver<u32>) = std::sync::mpsc::channel();
     let instant = Instant::now();
     let mut timer = interval_at(instant, Duration::from_secs(5));
 
@@ -265,6 +283,12 @@ async fn main() -> Result<(), Report> {
     match mqtt_client_clone.publish("myqutekitty/test", "first message") {
         Ok(_) => debug!("Pub OK"),
         Err(error) => error!("Error publishing! {:?}", error),
+    }
+
+    let topic = String::from("a/b");
+    match mqtt_client_clone.subscribe(&topic) {
+        Ok(_) => debug!("Sub OK"),
+        Err(error) => error!("Error subscribing! {:?}", error),
     }
 
     tokio::select! {

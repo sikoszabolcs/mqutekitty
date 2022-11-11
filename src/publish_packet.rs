@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::{
-    control_packets::{Encodable, FixedHeader},
+    control_packets::{as_u16_be, encode_remaining_length, Encodable, FixedHeader},
     ControlPacketType,
 };
 
@@ -100,6 +100,7 @@ impl<'a> Builder<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct PublishPacket<'a> {
     pub fixed_header: FixedHeader,
     pub topic_name: &'a str,
@@ -135,5 +136,71 @@ impl<'a> Encodable for PublishPacket<'a> {
         }
         vec.extend_from_slice(&self.payload);
         vec
+    }
+}
+
+impl<'a> From<&'a [u8]> for PublishPacket<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        let fixed_header = FixedHeader::from(bytes);
+        let remaining_length_byte_count = encode_remaining_length(fixed_header.remaining_length)
+            .unwrap()
+            .len();
+
+        // TODO: No packet id at QoS 0
+        let mut cursor = 1 + remaining_length_byte_count;
+        let topic_length_si = cursor;
+        let topic_length_ei = topic_length_si + 2;
+        let topic_length = as_u16_be(&bytes[topic_length_si..topic_length_ei]);
+        cursor += 2;
+        let topic_ei = cursor + topic_length as usize;
+        let topic = std::str::from_utf8(&bytes[cursor..topic_ei]);
+        cursor = topic_ei;
+        let payload_ei =
+            cursor + fixed_header.remaining_length - (cursor - 1 - remaining_length_byte_count);
+        let payload = &bytes[cursor..payload_ei];
+
+        // | control packet type byte | remaining_length bytes | topic_length bytes | topic bytes | payload bytes |
+        //                                                                                        ^               ^
+        //                                                                                      cursor        payload_ei
+        //                                                     |                 remaining length                 |
+        // remaining_length - (cursor - 1 - rem_len_bytes)
+
+        Self {
+            fixed_header: FixedHeader::from(bytes),
+            packet_id: None,
+            topic_name: topic.unwrap(),
+            payload: payload,
+        }
+    }
+}
+
+#[cfg(test)]
+mod publish_packet_tests {
+    use crate::control_packets::ControlPacketType;
+
+    use super::PublishPacket;
+
+    #[test]
+    fn test() {
+        let publish_packet_bytes: Vec<u8> = vec![
+            0b0011_0000,
+            9,
+            0,
+            3,
+            0x61,
+            0x2F,
+            0x62,
+            0x74,
+            0x65,
+            0x73,
+            0x74,
+        ];
+
+        let publish_packet = PublishPacket::from(publish_packet_bytes.as_slice());
+
+        assert_eq!(
+            publish_packet.fixed_header.packet_type,
+            ControlPacketType::Publish
+        );
     }
 }
